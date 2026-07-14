@@ -9,7 +9,6 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     String,
-    Text,
     func,
     text,
 )
@@ -70,7 +69,7 @@ class Checkout(Base):
         DateTime(timezone=True),
         nullable=True,
     )
-    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reason: Mapped[str | None] = mapped_column(String(250), nullable=True)
     qr_token: Mapped[str] = mapped_column(
         String(128),
         unique=True,

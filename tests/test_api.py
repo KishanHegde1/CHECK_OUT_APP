@@ -73,7 +73,7 @@ def create_checkout(
     response = client.post(
         "/api/student/checkouts",
         headers=headers,
-        json={} if payload is None else payload,
+        json={"reason": "Campus appointment"} if payload is None else payload,
     )
     return assert_success(response, 201)["data"]
 
@@ -240,21 +240,32 @@ def test_student_profile(
     assert profile["email"] == seeded_data.student_one_user.email
 
 
-def test_checkout_create_omits_reason_and_returns_secure_qr(
+def test_checkout_create_requires_and_persists_a_reason_with_secure_qr(
     client: TestClient,
     db_session: Session,
     seeded_data: SeedData,
 ) -> None:
     first_headers = auth_headers(client, seeded_data.student_one_user.username)
-    first = create_checkout(client, first_headers)
+    first = create_checkout(
+        client,
+        first_headers,
+        {"reason": "  Campus appointment  "},
+    )
 
-    assert first["reason"] is None
+    assert first["reason"] == "Campus appointment"
+    assert first["checkin_time"] is None
     assert first["status"] == "ACTIVE"
     assert first["student_id"] == seeded_data.student_one.student_id
     assert first["checkout_id"].startswith("CHK-")
     assert len(first["qr_token"]) >= 32
     assert re.fullmatch(r"[A-Za-z0-9_-]+", first["qr_token"])
     assert first["qr_token"] != first["checkout_id"]
+
+    checkout = db_session.scalar(
+        select(Checkout).where(Checkout.checkout_id == first["checkout_id"])
+    )
+    assert checkout is not None
+    assert checkout.reason == "Campus appointment"
 
     db_session.refresh(seeded_data.student_one)
     assert seeded_data.student_one.hostel_status.value == "OUTSIDE"
@@ -263,6 +274,29 @@ def test_checkout_create_omits_reason_and_returns_secure_qr(
     second = create_checkout(client, second_headers, {"reason": "Weekend visit"})
     assert second["qr_token"] != first["qr_token"]
     assert second["checkout_id"] != first["checkout_id"]
+
+
+@pytest.mark.parametrize(
+    "payload",
+    (
+        {},
+        {"reason": ""},
+        {"reason": "   "},
+        {"reason": "x" * 251},
+    ),
+)
+def test_checkout_reason_is_required_meaningful_and_at_most_250_characters(
+    client: TestClient,
+    seeded_data: SeedData,
+    payload: dict[str, str],
+) -> None:
+    response = client.post(
+        "/api/student/checkouts",
+        headers=auth_headers(client, seeded_data.student_one_user.username),
+        json=payload,
+    )
+
+    assert_error(response, 422)
 
 
 def test_duplicate_active_checkout_returns_409(
@@ -296,6 +330,8 @@ def test_checkout_list_detail_and_idor_protection(
     assert [item["checkout_id"] for item in list_body["data"]] == [
         created["checkout_id"]
     ]
+    assert list_body["data"][0]["reason"] == "Medical visit"
+    assert list_body["data"][0]["checkin_time"] is None
 
     public_detail = assert_success(
         client.get(
@@ -354,6 +390,8 @@ def test_security_verify_is_validated_audited_and_idempotent(
     assert first["student"]["student_id"] == seeded_data.student_one.student_id
     assert first["checkout"]["verified_by"] == seeded_data.security_staff.id
     assert first["checkout"]["verified_at"]
+    assert first["checkout"]["reason"] == "Campus appointment"
+    assert first["checkout"]["checkin_time"] is None
 
     second = assert_success(
         client.post(
@@ -407,15 +445,33 @@ def test_security_checkin_completes_checkout_and_allows_a_new_pass(
     )["data"]
     assert completed["checkout"]["status"] == "COMPLETED"
     assert completed["checkout"]["checkin_time"]
+    assert completed["checkout"]["reason"] == "Campus appointment"
     assert completed["student"]["hostel_status"] == "INSIDE"
 
-    retry = client.post(
-        verify_url,
-        headers=security_headers,
-        json={"qr_token": created["qr_token"], "action": "CHECKIN"},
-    )
-    retry_body = assert_error(retry, 409)
-    assert retry_body["message"] == "Checkout already completed"
+    retry = assert_success(
+        client.post(
+            verify_url,
+            headers=security_headers,
+            json={"qr_token": created["qr_token"], "action": "CHECKIN"},
+        )
+    )["data"]
+    assert retry["checkout"]["checkin_time"] == completed["checkout"]["checkin_time"]
+    assert retry["checkout"]["reason"] == "Campus appointment"
+
+    history = assert_success(
+        client.get("/api/student/checkouts", headers=student_headers)
+    )["data"]
+    assert history[0]["reason"] == "Campus appointment"
+    assert history[0]["checkin_time"] == completed["checkout"]["checkin_time"]
+
+    admin_checkouts = assert_success(
+        client.get(
+            "/api/admin/checkouts",
+            headers=auth_headers(client, seeded_data.admin_user.username),
+        )
+    )["data"]
+    assert admin_checkouts[0]["reason"] == "Campus appointment"
+    assert admin_checkouts[0]["checkin_time"] == completed["checkout"]["checkin_time"]
 
     replacement = create_checkout(client, student_headers)
     assert replacement["checkout_id"] != created["checkout_id"]
@@ -490,6 +546,8 @@ def test_admin_collections_active_notifications_and_student_detail(
     assert [item["checkout_id"] for item in active_checkouts] == [
         created["checkout_id"]
     ]
+    assert all_checkouts[0]["reason"] == "Family visit"
+    assert all_checkouts[0]["checkin_time"] is None
 
     staff = assert_success(
         client.get("/api/admin/security-staff", headers=admin_headers)

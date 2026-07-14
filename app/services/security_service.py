@@ -78,7 +78,13 @@ def verify_qr(
         raise APIError(status_code=404, message="Invalid QR token")
 
     if checkout.status == CheckoutStatus.COMPLETED:
-        raise APIError(status_code=409, message="Checkout already completed")
+        # A repeated scan is read-only: preserve the original check-in time and
+        # verifier instead of performing a second state transition.
+        return VerifyQRResponse(
+            student=StudentPublic.model_validate(checkout.student),
+            checkout=to_checkout_response(checkout),
+            verification_successful=True,
+        )
     if checkout.status == CheckoutStatus.CANCELLED:
         raise APIError(status_code=409, message="Checkout was cancelled")
     if checkout.status == CheckoutStatus.PENDING:

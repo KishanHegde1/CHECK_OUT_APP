@@ -373,7 +373,7 @@ def upgrade() -> None:
         sa.Column("student_id", sa.Integer(), nullable=False),
         sa.Column("checkout_time", sa.DateTime(timezone=True), nullable=False),
         sa.Column("checkin_time", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("reason", sa.Text(), nullable=True),
+        sa.Column("reason", sa.String(length=250), nullable=True),
         sa.Column("qr_token", sa.String(length=128), nullable=False),
         sa.Column(
             "status",

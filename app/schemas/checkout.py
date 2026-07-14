@@ -12,16 +12,19 @@ from .common import BaseSchema
 
 
 class CheckoutCreate(BaseSchema):
-    """Optional details supplied when a student creates a checkout."""
+    """Required reason supplied when a student creates a checkout."""
 
-    reason: str | None = Field(default=None, max_length=500)
+    reason: str = Field(min_length=1, max_length=250)
 
     @field_validator("reason", mode="after")
     @classmethod
-    def empty_reason_is_none(cls, value: str | None) -> str | None:
-        """Store an omitted and a whitespace-only reason consistently."""
+    def validate_reason(cls, value: str) -> str:
+        """Store a meaningful, bounded reason with no outer whitespace."""
 
-        return value or None
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("reason must not be blank")
+        return normalized
 
 
 class CheckoutResponse(BaseSchema):
@@ -37,7 +40,7 @@ class CheckoutResponse(BaseSchema):
     photo_url: str | None = None
     checkout_time: datetime
     checkin_time: datetime | None = None
-    reason: str | None = None
+    reason: str
     qr_token: str
     status: CheckoutStatus
     verified_by: int | None = None

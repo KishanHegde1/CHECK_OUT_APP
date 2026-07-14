@@ -161,7 +161,8 @@ reference.
 
 Login accepts a JSON body with `username` and `password`; the identifier may be
 a username or email, and `user_id`/`userId` are accepted aliases. Checkout
-creation accepts `{}` or an optional `reason`. QR verification accepts
+creation requires `{ "reason": "..." }`; the reason is trimmed, cannot be
+blank, and is limited to 250 characters. QR verification accepts
 `qr_token` and an optional `action`: `CHECKOUT` (the default) records the gate
 verification, while `CHECKIN` atomically completes an active checkout and
 returns the student to inside status. Completed, cancelled, and pending QR

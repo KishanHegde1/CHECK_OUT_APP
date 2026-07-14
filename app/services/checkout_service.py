@@ -30,7 +30,7 @@ def to_checkout_response(checkout: Checkout) -> CheckoutResponse:
         photo_url=student.photo_url,
         checkout_time=checkout.checkout_time,
         checkin_time=checkout.checkin_time,
-        reason=checkout.reason,
+        reason=(checkout.reason or "Not provided").strip() or "Not provided",
         qr_token=checkout.qr_token,
         status=checkout.status,
         verified_by=checkout.verified_by,

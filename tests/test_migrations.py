@@ -46,6 +46,12 @@ def test_initial_migration_upgrades_and_downgrades() -> None:
             index["name"] for index in inspect(connection).get_indexes("students")
         }
         assert "ix_students_hostel_block" in student_indexes
+        checkout_columns = {
+            column["name"]: str(column["type"])
+            for column in inspect(connection).get_columns("checkouts")
+        }
+        assert checkout_columns["reason"] == "VARCHAR(250)"
+        assert "checkin_time" in checkout_columns
         user_indexes = set(
             connection.scalars(
                 text(

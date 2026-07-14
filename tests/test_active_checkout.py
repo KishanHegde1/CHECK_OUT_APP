@@ -37,7 +37,11 @@ def _headers(client: TestClient, username: str) -> dict[str, str]:
 
 def _create_checkout(client: TestClient, headers: dict[str, str]) -> dict[str, Any]:
     return _success(
-        client.post("/api/student/checkouts", headers=headers, json={}),
+        client.post(
+            "/api/student/checkouts",
+            headers=headers,
+            json={"reason": "Study leave"},
+        ),
         status_code=201,
     )
 
@@ -74,6 +78,8 @@ def test_active_checkout_returns_the_original_stored_qr_token(
     assert second["checkout_id"] == created["checkout_id"]
     assert second["qr_token"] == created["qr_token"]
     assert first["status"] == "ACTIVE"
+    assert first["reason"] == "Study leave"
+    assert first["checkin_time"] is None
 
 
 def test_active_checkout_is_private_and_blocks_a_second_checkout(
@@ -99,7 +105,7 @@ def test_active_checkout_is_private_and_blocks_a_second_checkout(
     assert "active checkout" in duplicate_body["message"].lower()
 
 
-def test_checkin_completes_qr_and_prevents_reuse(
+def test_checkin_completes_qr_and_preserves_the_original_timestamp_on_rescan(
     client: TestClient,
     db_session: Session,
     seeded_data: SeedData,
@@ -115,10 +121,12 @@ def test_checkin_completes_qr_and_prevents_reuse(
             json={"qr_token": created["qr_token"], "action": "CHECKIN"},
         )
     )
-    reused = client.post(
-        "/api/security/verify-qr",
-        headers=security_headers,
-        json={"qr_token": created["qr_token"], "action": "CHECKIN"},
+    reused = _success(
+        client.post(
+            "/api/security/verify-qr",
+            headers=security_headers,
+            json={"qr_token": created["qr_token"], "action": "CHECKIN"},
+        )
     )
 
     assert completed["checkout"]["status"] == "COMPLETED"
@@ -126,7 +134,9 @@ def test_checkin_completes_qr_and_prevents_reuse(
     assert completed["checkout"]["verified_by"] == seeded_data.security_staff.id
     assert completed["checkout"]["verified_at"]
     assert completed["student"]["hostel_status"] == "INSIDE"
-    assert _error(reused, 409)["message"] == "Checkout already completed"
+    assert reused["checkout"]["status"] == "COMPLETED"
+    assert reused["checkout"]["checkin_time"] == completed["checkout"]["checkin_time"]
+    assert reused["checkout"]["reason"] == "Study leave"
 
     db_session.refresh(seeded_data.student_one)
     assert seeded_data.student_one.hostel_status.value == "INSIDE"
