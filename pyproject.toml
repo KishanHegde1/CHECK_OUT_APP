@@ -1,0 +1,35 @@
+[tool.black]
+line-length = 88
+target-version = ["py312"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-ra --strict-config --strict-markers"
+markers = [
+    "unit: isolated tests that do not require PostgreSQL",
+    "integration: tests that require a migrated PostgreSQL test database",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = [
+    # FastAPI dependency injection commonly uses callable defaults.
+    "B008",
+    # Classic generics keep these public schemas compatible with type checkers
+    # and Pydantic releases throughout the supported Python 3.12+ range.
+    "UP046",
+    "UP047",
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
