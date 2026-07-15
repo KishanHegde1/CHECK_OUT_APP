@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -15,6 +16,7 @@ from sqlalchemy.orm import Session
 from app.models import (
     Checkout,
     CheckoutStatus,
+    HostelStatus,
     Notification,
     NotificationType,
     User,
@@ -484,8 +486,13 @@ def test_admin_dashboard_returns_exact_database_counts(
     db_session: Session,
     seeded_data: SeedData,
 ) -> None:
-    student_headers = auth_headers(client, seeded_data.student_one_user.username)
-    create_checkout(client, student_headers)
+    first_student_headers = auth_headers(client, seeded_data.student_one_user.username)
+    first_created = create_checkout(client, first_student_headers)
+    second_student_headers = auth_headers(client, seeded_data.student_two_user.username)
+    second_created = create_checkout(
+        client, second_student_headers, {"reason": "Medical appointment"}
+    )
+    completed_time = datetime.now(UTC) + timedelta(days=1)
     db_session.add(
         Checkout(
             checkout_id="CHK-PENDING-001",
@@ -495,6 +502,17 @@ def test_admin_dashboard_returns_exact_database_counts(
             status=CheckoutStatus.PENDING,
         )
     )
+    db_session.add(
+        Checkout(
+            checkout_id="CHK-COMPLETED-001",
+            student_id=seeded_data.student_one.id,
+            checkout_time=completed_time,
+            checkin_time=completed_time,
+            reason="Old completed checkout",
+            qr_token="completed-token-with-more-than-sixteen-bytes-001",
+            status=CheckoutStatus.COMPLETED,
+        )
+    )
     db_session.commit()
 
     admin_headers = auth_headers(client, seeded_data.admin_user.username)
@@ -502,14 +520,73 @@ def test_admin_dashboard_returns_exact_database_counts(
         client.get("/api/admin/dashboard", headers=admin_headers)
     )["data"]
 
-    assert dashboard == {
-        "total_students": 2,
-        "students_inside": 1,
-        "students_outside": 1,
-        "active_checkouts": 1,
-        "pending_requests": 1,
-        "security_staff_count": 1,
-    }
+    assert dashboard["total_students"] == 2
+    assert dashboard["total_inside"] == 0
+    assert dashboard["total_outside"] == 2
+    assert (
+        dashboard["total_inside"] + dashboard["total_outside"]
+        == dashboard["total_students"]
+    )
+    assert [item["checkout_id"] for item in dashboard["outside_students"]] == [
+        second_created["checkout_id"],
+        first_created["checkout_id"],
+    ]
+    assert dashboard["outside_students"] == [
+        {
+            "id": seeded_data.student_two.id,
+            "student_id": seeded_data.student_two.student_id,
+            "full_name": seeded_data.student_two.full_name,
+            "room_number": seeded_data.student_two.room_number,
+            "department": seeded_data.student_two.department,
+            "year": seeded_data.student_two.year,
+            "checkout_id": second_created["checkout_id"],
+            "checkout_time": second_created["checkout_time"],
+            "reason": "Medical appointment",
+            "status": "ACTIVE",
+        },
+        {
+            "id": seeded_data.student_one.id,
+            "student_id": seeded_data.student_one.student_id,
+            "full_name": seeded_data.student_one.full_name,
+            "room_number": seeded_data.student_one.room_number,
+            "department": seeded_data.student_one.department,
+            "year": seeded_data.student_one.year,
+            "checkout_id": first_created["checkout_id"],
+            "checkout_time": first_created["checkout_time"],
+            "reason": "Campus appointment",
+            "status": "ACTIVE",
+        },
+    ]
+    # Legacy fields remain available for already-deployed dashboard clients.
+    assert dashboard["students_inside"] == 0
+    assert dashboard["students_outside"] == 2
+    assert dashboard["active_checkouts"] == 2
+    assert dashboard["pending_requests"] == 1
+    assert dashboard["security_staff_count"] == 1
+
+
+def test_dashboard_excludes_inactive_students_and_returns_empty_outside_list(
+    client: TestClient,
+    db_session: Session,
+    seeded_data: SeedData,
+) -> None:
+    seeded_data.student_one.hostel_status = HostelStatus.OUTSIDE
+    seeded_data.student_two_user.is_active = False
+    db_session.commit()
+
+    admin_headers = auth_headers(client, seeded_data.admin_user.username)
+    dashboard = assert_success(
+        client.get("/api/admin/dashboard", headers=admin_headers)
+    )["data"]
+
+    assert dashboard["total_students"] == 1
+    assert dashboard["total_inside"] == 0
+    assert dashboard["total_outside"] == 1
+    assert (
+        dashboard["total_inside"] + dashboard["total_outside"]
+        == dashboard["total_students"]
+    )
+    assert dashboard["outside_students"] == []
 
 
 def test_admin_collections_active_notifications_and_student_detail(

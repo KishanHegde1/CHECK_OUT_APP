@@ -18,6 +18,7 @@ from app.schemas.admin import (
     AdminProfileResponse,
     AdminStudentDetailResponse,
     DashboardResponse,
+    OutsideStudentResponse,
 )
 from app.schemas.checkout import CheckoutResponse
 from app.schemas.notification import NotificationResponse
@@ -294,25 +295,67 @@ def set_student_active(
 
 
 def get_dashboard(db: Session) -> DashboardResponse:
-    """Calculate all dashboard counters directly in the database."""
+    """Return active-student counts and each outside student's current checkout."""
 
-    total_students = db.scalar(select(func.count(Student.id))) or 0
-    students_inside = (
+    active_student = Student.user.has(User.is_active.is_(True))
+    total_students = (
+        db.scalar(select(func.count(Student.id)).where(active_student)) or 0
+    )
+    total_inside = (
         db.scalar(
             select(func.count(Student.id)).where(
-                Student.hostel_status == HostelStatus.INSIDE
+                active_student, Student.hostel_status == HostelStatus.INSIDE
             )
         )
         or 0
     )
-    students_outside = (
+    total_outside = (
         db.scalar(
             select(func.count(Student.id)).where(
-                Student.hostel_status == HostelStatus.OUTSIDE
+                active_student, Student.hostel_status == HostelStatus.OUTSIDE
             )
         )
         or 0
     )
+
+    # The correlated lookup uses the existing (student_id, status) checkout
+    # index and ensures a historical completed checkout is never selected.
+    latest_active_checkout_id = (
+        select(Checkout.id)
+        .where(
+            Checkout.student_id == Student.id,
+            Checkout.status == CheckoutStatus.ACTIVE,
+        )
+        .order_by(Checkout.checkout_time.desc(), Checkout.id.desc())
+        .limit(1)
+        .correlate(Student)
+        .scalar_subquery()
+    )
+    outside_rows = db.execute(
+        select(Student, Checkout)
+        .join(User, User.id == Student.user_id)
+        .join(Checkout, Checkout.id == latest_active_checkout_id)
+        .where(
+            User.is_active.is_(True),
+            Student.hostel_status == HostelStatus.OUTSIDE,
+        )
+        .order_by(Checkout.checkout_time.desc(), Checkout.id.desc())
+    ).all()
+    outside_students = [
+        OutsideStudentResponse(
+            id=student.id,
+            student_id=student.student_id,
+            full_name=student.full_name,
+            room_number=student.room_number,
+            department=student.department,
+            year=student.year,
+            checkout_id=checkout.checkout_id,
+            checkout_time=checkout.checkout_time,
+            reason=(checkout.reason or "Not provided").strip() or "Not provided",
+            status=checkout.status,
+        )
+        for student, checkout in outside_rows
+    ]
     active_checkouts = (
         db.scalar(
             select(func.count(Checkout.id)).where(
@@ -332,8 +375,11 @@ def get_dashboard(db: Session) -> DashboardResponse:
     security_staff_count = db.scalar(select(func.count(SecurityStaff.id))) or 0
     return DashboardResponse(
         total_students=total_students,
-        students_inside=students_inside,
-        students_outside=students_outside,
+        total_inside=total_inside,
+        total_outside=total_outside,
+        outside_students=outside_students,
+        students_inside=total_inside,
+        students_outside=total_outside,
         active_checkouts=active_checkouts,
         pending_requests=pending_requests,
         security_staff_count=security_staff_count,

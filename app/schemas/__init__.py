@@ -1,6 +1,11 @@
 """Public schema exports for the Hostel Checkout API."""
 
-from .admin import AdminProfileResponse, AdminStudentDetailResponse, DashboardResponse
+from .admin import (
+    AdminProfileResponse,
+    AdminStudentDetailResponse,
+    DashboardResponse,
+    OutsideStudentResponse,
+)
 from .auth import (
     CurrentUserResponse,
     LoginRequest,
@@ -76,6 +81,7 @@ __all__ = [
     "NotificationListResponse",
     "NotificationReadUpdate",
     "NotificationResponse",
+    "OutsideStudentResponse",
     "PaginatedData",
     "PaginationMeta",
     "QRTokenResponse",
